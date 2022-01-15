@@ -1,34 +1,60 @@
+from collections import defaultdict
+
 import paho.mqtt.client as mqtt
 import redis
+import json
 
-rd = redis.StrictRedis(host='www.zikime.com', port=6379, db=0)
+state_info_dict = defaultdict(str)
 
-# subscriber callback
+rd = redis.StrictRedis(host='localhost', port=6379, db=0)
+
 def on_message(client, userdata, message):
     decode_msg = str(message.payload.decode("utf-8"))
-    #print("message received ", decode_msg)
-    #print("message topic=", message.topic)
-    #print("message qos=", message.qos)
-    #print("message retain flag=", message.retain)
 
     device, serial, state = message.topic.split('/')
     print("serial:", serial)
-
-    if message.topic == "device/connect":
+    
+    state_info = {
+        "power": True,
+        "latitude": '',
+        "longitude": '',
+        "mode": ''
+    }
+    
+    state_info_dict[serial] = state_info
+    
+    json_already_state = rd.get(serial).decode('utf-8')
+    already_state = dict(json.loads(json_already_state))
+    
+    if "mode" in already_state.keys():
+        state_info_dict[serial]["mode"] = already_state["mode"]
+    if "latitude" in already_state.keys():
+        state_info_dict[serial]["latitude"] = already_state["latitude"]
+        state_info_dict[serial]["longitude"] = already_state["longitude"]
+        
+    if message.topic == "device/+/connect":
         pass
-    elif message.topic == "device/register":
+    elif message.topic == "device/+/register":
         pass
     elif state == "position":
         latitude, longitude = map(float, decode_msg.split(','))
+        state_info_dict[serial]["latitude"] = latitude
+        state_info_dict[serial]["longitude"] = longitude
+        
         print("latitude:", latitude, '  ', "longitude:", longitude)
-    elif state == "power":
-        print("power:", decode_msg)
+        
     elif state == "mode":
+        state_info_dict[serial]["mode"] = decode_msg
         print("mode:", decode_msg)
+        
+    json_state_info = json.dumps(state_info_dict[serial], ensure_ascii=False).encode('utf-8')
+    rd.set(serial, json_state_info)
+    
+    print(state_info_dict[serial])
 
-broker_address = "0.0.0.0"
+broker_address = "localhost"
 client1 = mqtt.Client("client1")
-client1.connect(broker_address, 8080)
+client1.connect(broker_address, 1883)
 client1.subscribe("device/+/#")
 client1.on_message = on_message
 
